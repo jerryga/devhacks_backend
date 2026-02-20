@@ -64,4 +64,26 @@ function signup(req, res) {
     });
 }
 
-export { login, signup };
+function updateUserProfile(req, res) {
+  const { id, firstName, lastName, gender, address, phone, dateOfBirth, chronicConditions, preganancyStatus } = req.body;
+  const { error } = supabaseClient
+  .from("user")
+  .update({ first_name: firstName, 
+    last_name: lastName,
+    gender: gender,
+    address: address,
+    phone: phone,
+    date_of_birth: dateOfBirth,
+    chronic_conditions: chronicConditions,
+    preganancy_status: preganancyStatus
+  })
+  .eq("id", id)
+  .then(() => {
+    res.status(200).send("Profile updated successfully");
+  })
+  .catch((error) => {
+    res.status(500).send("Error updating profile: " + error.message);
+  });
+}
+
+export { login, signup, updateUserProfile };
