@@ -1,7 +1,8 @@
-require("dotenv").config();
+import dotenv from "dotenv";
+import express from "express";
+import { authRoutes } from "./routers/authRoutes.js";
 
-const express = require("express");
-const authRoutes = require("./routers/authRoutes");
+dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
