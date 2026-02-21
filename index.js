@@ -4,6 +4,7 @@ import cors from "cors";
 import { authRoutes } from "./routers/authRoutes.js";
 import { userRoutes } from "./routers/userRoutes.js";
 import { vaccineRoutes } from "./routers/vaccineRoutes.js";
+import { clinicRoutes } from "./routers/clicnicRoutes.js";
 
 dotenv.config();
 
@@ -18,6 +19,7 @@ app.use(
 app.use(express.json());
 app.use("/api/auth", authRoutes);
 app.use("/api/user", userRoutes);
+app.use("/api/clinic", clinicRoutes);
 app.use("/api/vaccine", vaccineRoutes);
 
 app.listen(PORT, () => {
