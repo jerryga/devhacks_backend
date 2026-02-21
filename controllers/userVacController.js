@@ -1,12 +1,12 @@
 import { supabaseClient } from "../tools/supabaseClient.js";
 
 async function createUserVac(req, res) {
-  const { user_id, vac_id, clicnic_id, dose, date } = req.body;
+  const { user_id, vac_id, clinic_id, dose, date } = req.body;
 
-  if (!user_id || !vac_id || !clicnic_id) {
+  if (!user_id || !vac_id || !clinic_id) {
     return res
       .status(400)
-      .json({ message: "user_id, vac_id, and clicnic_id are required" });
+      .json({ message: "user_id, vac_id, and clinic_id are required" });
   }
 
   const user = await supabaseClient
@@ -31,7 +31,7 @@ async function createUserVac(req, res) {
 
   const { data, error } = await supabaseClient
     .from("user_vac")
-    .insert({ user_id, vac_id, clicnic_id, dose, date });
+    .insert({ user_id, vac_id, clinic_id, dose, date });
   if (error) {
     return res
       .status(500)
