@@ -14,8 +14,19 @@ const JOB_NAME = "send-vaccine-reminder";
 const APPOINTMENT_HOUR_UTC = 9;
 
 let reminderWorker = null;
+const DEFAULT_REMINDER_OFFSET_DAYS = 14;
+
+class HttpError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+  }
+}
 
 function parseReminderOffset(value) {
+  if (value === undefined || value === null || value === "") {
+    return DEFAULT_REMINDER_OFFSET_DAYS;
+  }
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 0) {
     return null;
@@ -24,11 +35,37 @@ function parseReminderOffset(value) {
 }
 
 function buildAppointmentDate(appointmentDate) {
-  const date = new Date(`${appointmentDate}T${String(APPOINTMENT_HOUR_UTC).padStart(2, "0")}:00:00.000Z`);
+  if (!isValidIsoDate(appointmentDate)) {
+    return null;
+  }
+  const date = new Date(
+    `${appointmentDate}T${String(APPOINTMENT_HOUR_UTC).padStart(2, "0")}:00:00.000Z`,
+  );
   if (Number.isNaN(date.getTime())) {
     return null;
   }
   return date;
+}
+
+function isValidIsoDate(value) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false;
+  }
+
+  const [yearRaw, monthRaw, dayRaw] = value.split("-");
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  const day = Number(dayRaw);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+    return false;
+  }
+
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  );
 }
 
 function buildReminderSchedule(appointmentDate, reminderOffsetDays) {
@@ -47,29 +84,36 @@ function buildReminderSchedule(appointmentDate, reminderOffsetDays) {
   };
 }
 
-async function getReminderMetadata(userId, vacId, clinicId) {
-  const [{ data: user, error: userError }, { data: vaccine, error: vaccineError }] =
-    await Promise.all([
-      supabaseClient
-        .from("user")
-        .select("id, email, first_name, last_name")
-        .eq("id", userId)
-        .maybeSingle(),
-      supabaseClient.from("vaccine").select("id, name").eq("id", vacId).maybeSingle(),
-    ]);
+async function getReminderMetadata(userId, vacId, clinicId, vaccineName) {
+  const [{ data: user, error: userError }, vaccineLookup] = await Promise.all([
+    supabaseClient
+      .from("user")
+      .select("id, email, first_name, last_name")
+      .eq("id", userId)
+      .maybeSingle(),
+    vacId
+      ? supabaseClient.from("vaccine").select("id, name").eq("id", vacId).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+  ]);
 
   if (userError) {
     throw new Error("Error fetching user: " + userError.message);
   }
   if (!user || !user.email) {
-    throw new Error("User not found or missing email");
+    throw new HttpError(404, "User not found or missing email");
   }
 
+  const { data: vaccine, error: vaccineError } = vaccineLookup;
   if (vaccineError) {
     throw new Error("Error fetching vaccine: " + vaccineError.message);
   }
-  if (!vaccine) {
-    throw new Error("Vaccine not found");
+  if (vacId && !vaccine) {
+    throw new HttpError(404, "Vaccine not found");
+  }
+
+  const resolvedVaccineName = vaccine?.name || vaccineName?.trim() || null;
+  if (!resolvedVaccineName) {
+    throw new HttpError(400, "Provide vac_id or vaccine_name");
   }
 
   let clinic = null;
@@ -86,7 +130,7 @@ async function getReminderMetadata(userId, vacId, clinicId) {
     clinic = data;
   }
 
-  return { user, vaccine, clinic };
+  return { user, clinic, vaccineName: resolvedVaccineName };
 }
 
 async function sendReminderEmail(jobData) {
@@ -159,17 +203,29 @@ function ensureReminderWorker() {
 
 async function scheduleReminder(req, res) {
   try {
+    const authUserId = req.user?.sub;
+    if (!authUserId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
     const {
       user_id,
       vac_id,
+      vaccine_name,
       clinic_id,
       appointment_date,
       reminder_offset_days,
     } = req.body ?? {};
 
-    if (!user_id || !vac_id || !appointment_date) {
+    if (user_id && String(user_id) !== String(authUserId)) {
+      return res.status(403).json({
+        message: "Cannot schedule reminders for another user",
+      });
+    }
+
+    if (!appointment_date) {
       return res.status(400).json({
-        message: "user_id, vac_id, and appointment_date are required",
+        message: "appointment_date is required",
       });
     }
 
@@ -187,21 +243,39 @@ async function scheduleReminder(req, res) {
       });
     }
 
-    const { user, vaccine, clinic } = await getReminderMetadata(
-      user_id,
+    const { user, vaccineName, clinic } = await getReminderMetadata(
+      authUserId,
       vac_id,
       clinic_id,
+      vaccine_name,
     );
 
-    const jobId = `reminder:${user_id}:${vac_id}:${appointment_date}:${reminderOffsetDays}`;
+    const vaccineIdentity = vac_id || vaccine_name?.trim();
+    const jobId = `reminder:${authUserId}:${vaccineIdentity}:${appointment_date}:${reminderOffsetDays}`;
+
+    const existingJob = await reminderQueue.getJob(jobId);
+    if (existingJob) {
+      return res.status(200).json({
+        message: "Reminder already scheduled",
+        data: {
+          job_id: jobId,
+          appointment_date,
+          reminder_offset_days: reminderOffsetDays,
+          scheduled_for: schedule.reminderAt.toISOString(),
+          will_send_immediately: schedule.willSendImmediately,
+        },
+      });
+    }
 
     await reminderQueue.add(
       JOB_NAME,
       {
+        userId: authUserId,
         email: user.email,
         firstName: user.first_name,
         lastName: user.last_name,
-        vaccineName: vaccine.name || "Vaccine",
+        vacId: vac_id || null,
+        vaccineName: vaccineName || "Vaccine",
         clinicName: clinic?.name || null,
         appointmentDate: appointment_date,
       },
@@ -222,10 +296,94 @@ async function scheduleReminder(req, res) {
       },
     });
   } catch (error) {
+    if (error?.status) {
+      return res.status(error.status).json({ message: error.message });
+    }
+    if (String(error?.message || "").toLowerCase().includes("jobid")) {
+      return res.status(409).json({ message: "Reminder already scheduled" });
+    }
     return res.status(500).json({
       message: "Error scheduling reminder: " + error.message,
     });
   }
 }
 
-export { resend, ensureReminderWorker, scheduleReminder };
+async function listReminders(req, res) {
+  try {
+    const userId = req.user?.sub;
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const jobs = await reminderQueue.getJobs(
+      ["delayed", "waiting", "active", "completed", "failed"],
+      0,
+      100,
+      true,
+    );
+
+    const ownJobs = jobs.filter(
+      (job) => job?.name === JOB_NAME && String(job?.data?.userId) === String(userId),
+    );
+
+    const data = await Promise.all(
+      ownJobs.map(async (job) => ({
+        job_id: job.id,
+        status: await job.getState(),
+        appointment_date: job.data?.appointmentDate || null,
+        vaccine_name: job.data?.vaccineName || null,
+        created_at: new Date(job.timestamp).toISOString(),
+        scheduled_for: new Date(job.timestamp + (job.delay || 0)).toISOString(),
+      })),
+    );
+
+    return res.status(200).json({
+      message: "Reminders fetched successfully",
+      data,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Error fetching reminders: " + error.message,
+    });
+  }
+}
+
+async function cancelReminder(req, res) {
+  try {
+    const userId = req.user?.sub;
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const jobId = req.params.jobId;
+    if (!jobId) {
+      return res.status(400).json({ message: "jobId is required" });
+    }
+
+    const job = await reminderQueue.getJob(jobId);
+    if (!job) {
+      return res.status(404).json({ message: "Reminder not found" });
+    }
+
+    if (String(job?.data?.userId) !== String(userId)) {
+      return res
+        .status(403)
+        .json({ message: "Cannot cancel another user's reminder" });
+    }
+
+    await job.remove();
+    return res.status(200).json({ message: "Reminder canceled successfully" });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Error canceling reminder: " + error.message,
+    });
+  }
+}
+
+export {
+  resend,
+  ensureReminderWorker,
+  scheduleReminder,
+  listReminders,
+  cancelReminder,
+};

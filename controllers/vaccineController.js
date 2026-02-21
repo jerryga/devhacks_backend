@@ -1,6 +1,6 @@
 import { supabaseClient } from "../tools/supabaseClient.js";
 
-async function getVaccine(res) {
+async function getVaccine(req, res) {
     try {
         const { data, error } = await supabaseClient
         .from("vaccine")
