@@ -140,10 +140,6 @@ async function getEligibleVacs(req, res) {
         )
       : null;
     const eligibleVacs = (vaccines || []).filter((vac) => {
-      if (!vac.conditions || vac.conditions.length === 0) {
-        return true;
-      }
-
       if (vac.min_age && (userAge === null || userAge < vac.min_age)) {
         return false;
       }
@@ -152,6 +148,9 @@ async function getEligibleVacs(req, res) {
         return false;
       }
 
+      if (!vac.conditions || vac.conditions.length === 0) {
+        return true;
+      }
       return vac.conditions.every((cond) => user.conditions?.includes(cond));
     });
 
@@ -184,11 +183,9 @@ async function getOverdueVacs(req, res) {
       .eq("user_id", user_id);
 
     if (userVacsError) {
-      return res
-        .status(500)
-        .json({
-          message: "Error fetching user_vacs: " + userVacsError.message,
-        });
+      return res.status(500).json({
+        message: "Error fetching user_vacs: " + userVacsError.message,
+      });
     }
 
     const overdueVacs = (userVacs || []).filter((uv) => {
@@ -202,7 +199,10 @@ async function getOverdueVacs(req, res) {
     const { data: vaccines, error: vacError } = await supabaseClient
       .from("vaccine")
       .select("*")
-      .in("id", overdueVacs.map((uv) => uv.vac_id));
+      .in(
+        "id",
+        overdueVacs.map((uv) => uv.vac_id),
+      );
 
     if (vacError) {
       return res
@@ -217,7 +217,7 @@ async function getOverdueVacs(req, res) {
         vac_details: vacDetails || null,
       };
     });
-      
+
     return res.status(200).json({
       message: "Overdue vaccines fetched successfully",
       data: overdueVacsWithDetails,
