@@ -15,9 +15,11 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.81.1",
     "bcryptjs": "^3.0.3",
+    "bullmq": "^5.70.0",
     "cors": "^2.8.6",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
+    "ioredis": "^5.9.3",
     "jsonwebtoken": "^9.0.3",
     "resend": "^6.5.2"
   },
