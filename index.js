@@ -21,7 +21,6 @@ app.use(express.json());
 app.use("/api/auth", authRoutes);
 app.use("/api/user", userRoutes);
 app.use("/api/clinic", clinicRoutes);
-app.use("/api/clinic", clinicRoutes);
 app.use("/api/vaccine", vaccineRoutes);
 app.use("/api/user_vac", userVacRoutes);
 
