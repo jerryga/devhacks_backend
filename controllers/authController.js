@@ -129,6 +129,7 @@ async function updateUserProfile(req, res) {
       birth,
       conditions,
       pregnant,
+      vac_history,
     } = req.body;
 
     const targetUserId = req.user?.sub;
@@ -145,6 +146,7 @@ async function updateUserProfile(req, res) {
       birth: birth,
       conditions: conditions,
       pregnant: pregnant,
+      vac_history: vac_history,
     };
 
     const filteredPayload = Object.fromEntries(
