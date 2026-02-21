@@ -3,6 +3,18 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "7d";
+const ACCOUNT_TABLE_BY_ROLE = {
+  user: "user",
+  clinic: "clinic",
+};
+
+function resolveAuthRole(body = {}) {
+  const role = (body.role || "user").toString().trim().toLowerCase();
+  if (!ACCOUNT_TABLE_BY_ROLE[role]) {
+    return { error: "Invalid role. Use 'user' or 'clinic'." };
+  }
+  return { role, table: ACCOUNT_TABLE_BY_ROLE[role] };
+}
 
 function getJwtSecret() {
   const secret = process.env.JWT_SECRET;
@@ -14,7 +26,12 @@ function getJwtSecret() {
 
 async function login(req, res) {
   try {
-    const { email, password } = req.body;
+    const { email, password } = req.body ?? {};
+    const roleResolution = resolveAuthRole(req.body);
+    if (roleResolution.error) {
+      return res.status(400).send(roleResolution.error);
+    }
+    const { role, table } = roleResolution;
 
     if (!email || !password) {
       return res.status(400).send("Email and password are required");
@@ -23,7 +40,7 @@ async function login(req, res) {
     const normalizedEmail = email.trim().toLowerCase();
 
     const { data: user, error } = await supabaseClient
-      .from("user")
+      .from(table)
       .select("id, email, password")
       .eq("email", normalizedEmail)
       .maybeSingle();
@@ -42,7 +59,7 @@ async function login(req, res) {
     }
 
     const token = jwt.sign(
-      { sub: user.id || user.email, email: user.email },
+      { sub: user.id || user.email, email: user.email, role },
       getJwtSecret(),
       { expiresIn: JWT_EXPIRES_IN },
     );
@@ -55,7 +72,12 @@ async function login(req, res) {
 
 async function signup(req, res) {
   try {
-    const { email, password } = req.body;
+    const { email, password } = req.body ?? {};
+    const roleResolution = resolveAuthRole(req.body);
+    if (roleResolution.error) {
+      return res.status(400).send(roleResolution.error);
+    }
+    const { table } = roleResolution;
 
     if (!email || !password) {
       return res.status(400).send("Email and password are required");
@@ -64,7 +86,7 @@ async function signup(req, res) {
     const normalizedEmail = email.trim().toLowerCase();
 
     const { data: existingUsers, error: lookupError } = await supabaseClient
-      .from("user")
+      .from(table)
       .select("email")
       .eq("email", normalizedEmail);
 
@@ -74,14 +96,14 @@ async function signup(req, res) {
         .send("Error during signup: " + lookupError.message);
     }
 
-    if (existingUsers.length > 0) {
+    if ((existingUsers ?? []).length > 0) {
       return res.status(400).send("Email already exists");
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
     const { error: insertError } = await supabaseClient
-      .from("user")
+      .from(table)
       .insert({ email: normalizedEmail, password: hashedPassword });
 
     if (insertError) {
