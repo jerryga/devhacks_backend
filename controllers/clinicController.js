@@ -18,6 +18,35 @@ async function signup(req, res) {
   return unifiedSignup(req, res);
 }
 
+async function updateClinicProfile(req, res) {
+  const clinicId = req.user?.sub;
+  if (!clinicId) {
+    return res.status(401).send("Unauthorized");
+  }
+
+  const { name, address, phone, vaccancy, postcode, latitude, longitude } =
+    req.body;
+
+  try {
+    const { data, error } = await supabaseClient
+      .from("clinic")
+      .update({ name, address, phone, vaccancy, postcode, latitude, longitude })
+      .eq("id", clinicId)
+      .maybeSingle();
+
+    if (error) {
+      return res.status(500).send("Error updating profile: " + error.message);
+    }
+
+    return res.status(200).json({
+      message: "Profile updated successfully",
+      data,
+    });
+  } catch (error) {
+    return res.status(500).send("Error updating profile: " + error.message);
+  }
+}
+
 async function getAllClinics(req, res) {
   try {
     const { data, error } = await supabaseClient.from("clinic").select("*");
@@ -65,4 +94,4 @@ async function getClinicById(req, res) {
   }
 }
 
-export { login, signup, getAllClinics, getClinicById };
+export { login, signup, updateClinicProfile, getAllClinics, getClinicById };
